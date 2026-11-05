@@ -72,6 +72,7 @@ class Config:
     retry_delay: int
     video_mode: str
     video_bitrate: int
+    audio_mode: str
     audio_bitrate: str
     rtmp_server: str
     default_key: str
@@ -135,6 +136,11 @@ def load_config() -> Config:
         logger.warning(f"配置中的视频编码[{video_mode}]无法识别，已使用 auto")
         video_mode = "auto"
 
+    audio_mode = read_option(parser, "推流设置", "音频编码", "copy").lower()
+    if audio_mode not in ("copy", "aac"):
+        logger.warning(f"配置中的音频编码[{audio_mode}]无法识别，已使用 copy")
+        audio_mode = "copy"
+
     rtmp_server = read_option(parser, "YouTube", "RTMP服务器地址", "rtmp://a.rtmp.youtube.com/live2")
     default_key = read_option(parser, "YouTube", "默认串流密钥", "")
 
@@ -146,6 +152,7 @@ def load_config() -> Config:
         retry_delay=read_int(parser, "推流设置", "断流重试间隔(秒)", 10, 1),
         video_mode=video_mode,
         video_bitrate=read_int(parser, "推流设置", "视频码率(kbps)", 6000, 500),
+        audio_mode=audio_mode,
         audio_bitrate=read_option(parser, "推流设置", "音频码率", "160k"),
         rtmp_server=rtmp_server,
         default_key=default_key,
@@ -228,26 +235,56 @@ def resolve_stream(room: Room, cfg: Config) -> dict | None:
         return None
 
 
+def is_h265(url: str) -> bool:
+    codec_param = get_query_params(url, "codec")
+    return bool(codec_param) and str(codec_param[0]).lower() == "h265"
+
+
+def candidate_sources(stream_info: dict) -> list[dict]:
+    candidates = [{
+        "flv_url": stream_info.get("flv_url") or "",
+        "m3u8_url": stream_info.get("m3u8_url") or "",
+    }]
+    candidates += [
+        {"flv_url": item.get("flv_url") or "", "m3u8_url": item.get("m3u8_url") or ""}
+        for item in stream_info.get("sources") or []
+    ]
+
+    unique: list[dict] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        source_url = candidate["flv_url"] or candidate["m3u8_url"]
+        if source_url and source_url not in seen:
+            seen.add(source_url)
+            unique.append(candidate)
+    return unique
+
+
 def pick_source(stream_info: dict, cfg: Config) -> tuple[str | None, bool]:
-    flv_url = stream_info.get("flv_url") or ""
-    m3u8_url = stream_info.get("m3u8_url") or ""
-    source_url = flv_url or m3u8_url
-    if not source_url:
+    candidates = candidate_sources(stream_info)
+    if not candidates:
         return None, False
 
-    codec = ""
-    if flv_url:
-        codec_param = get_query_params(flv_url, "codec")
-        if codec_param:
-            codec = str(codec_param[0]).lower()
-
     if cfg.video_mode == "libx264":
-        return source_url, True
-    if codec == "h265":
-        if cfg.video_mode == "copy":
-            logger.warning("直播源为 H.265，YouTube 不支持该编码，已自动改为转码推流")
-        return source_url, True
-    return source_url, False
+        candidate = candidates[0]
+        return candidate["flv_url"] or candidate["m3u8_url"], True
+
+    # YouTube only accepts H.264, so with passthrough we fall back to another
+    # rendition of the same room before giving up.
+    for candidate in candidates:
+        if candidate["flv_url"] and not is_h265(candidate["flv_url"]):
+            return candidate["flv_url"], False
+        if candidate["m3u8_url"] and not is_h265(candidate["m3u8_url"]):
+            return candidate["m3u8_url"], False
+
+    if cfg.video_mode == "copy":
+        logger.warning("该直播间的所有清晰度均为 H.265，YouTube 不支持，已跳过；"
+                       "如需自动转码请将 视频编码 改为 auto")
+        return None, False
+
+    logger.warning("直播源均为 H.265，已按 auto 配置转为 H.264 推流")
+    candidate = candidates[0]
+    return candidate["flv_url"] or candidate["m3u8_url"], True
 
 
 def build_ffmpeg_command(cfg: Config, source_url: str, ingest_url: str, transcode: bool) -> list[str]:
@@ -277,8 +314,12 @@ def build_ffmpeg_command(cfg: Config, source_url: str, ingest_url: str, transcod
     else:
         command += ["-c:v", "copy"]
 
+    if cfg.audio_mode == "aac":
+        command += ["-c:a", "aac", "-b:a", cfg.audio_bitrate, "-ar", "44100", "-ac", "2"]
+    else:
+        command += ["-c:a", "copy"]
+
     command += [
-        "-c:a", "aac", "-b:a", cfg.audio_bitrate, "-ar", "44100", "-ac", "2",
         "-max_muxing_queue_size", "1024",
         "-f", "flv", ingest_url,
     ]

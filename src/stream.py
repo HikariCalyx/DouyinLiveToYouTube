@@ -56,6 +56,15 @@ async def get_douyin_stream_url(json_data: dict, video_quality: str, proxy_addr:
             index = quality_index + 1 if quality_index < 4 else quality_index - 1
             m3u8_url = m3u8_url_list[index]
             flv_url = flv_url_list[index]
+
+        sources = []
+        for position, quality_key in enumerate(flv_url_dict.keys()):
+            sources.append({
+                'quality': quality_key,
+                'flv_url': flv_url_list[position],
+                'm3u8_url': m3u8_url_list[position],
+            })
+
         result |= {
             'is_live': True,
             'title': json_data['title'],
@@ -63,5 +72,6 @@ async def get_douyin_stream_url(json_data: dict, video_quality: str, proxy_addr:
             'm3u8_url': m3u8_url,
             'flv_url': flv_url,
             'record_url': m3u8_url or flv_url,
+            'sources': sources,
         }
     return result
