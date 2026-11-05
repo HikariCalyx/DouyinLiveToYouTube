@@ -1,0 +1,27 @@
+{% extends "streams/base.html" %}
+
+{% block title %}{% if object %}编辑直播间{% else %}新增直播间{% endif %} · 抖音 → YouTube{% endblock %}
+
+{% block content %}
+<section class="card narrow">
+  <h1>{% if object %}编辑直播间{% else %}新增直播间{% endif %}</h1>
+  <form method="post">
+    {% csrf_token %}
+    {% for error in form.non_field_errors %}
+    <p class="error">{{ error }}</p>
+    {% endfor %}
+    {% for field in form %}
+    <div class="field">
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<div class="muted small">{{ field.help_text }}</div>{% endif %}
+      {% for error in field.errors %}<div class="error small">{{ error }}</div>{% endfor %}
+    </div>
+    {% endfor %}
+    <div class="form-actions">
+      <button class="primary" type="submit">保存</button>
+      <a class="button" href="{% url 'dashboard' %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

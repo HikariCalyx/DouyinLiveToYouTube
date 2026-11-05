@@ -1,0 +1,25 @@
+{% extends "streams/base.html" %}
+
+{% block title %}推流日志 · 抖音 → YouTube{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <h1>{{ session.room.display_name }} 推流日志</h1>
+    <a class="button" href="{% url 'dashboard' %}">返回</a>
+  </div>
+  <p class="muted small">
+    开始 {{ session.started_at }} ·
+    状态 {{ session.get_status_display }} ·
+    {% if session.ended_at %}结束 {{ session.ended_at }} · {% endif %}
+    返回码 {{ session.return_code|default:"-" }} ·
+    {{ session.duration_text }}
+  </p>
+  {% if lines %}
+  <pre class="log">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+  <p class="muted">暂无日志输出（FFmpeg 仅在有告警时写入）。</p>
+  {% endif %}
+</section>
+{% endblock %}

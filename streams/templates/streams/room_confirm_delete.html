@@ -1,0 +1,17 @@
+{% extends "streams/base.html" %}
+
+{% block title %}删除直播间 · 抖音 → YouTube{% endblock %}
+
+{% block content %}
+<section class="card narrow">
+  <h1>删除直播间</h1>
+  <p>确定要删除 <strong>{{ object.display_name }}</strong> 吗？相关推流记录也会一并删除。</p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-actions">
+      <button class="danger" type="submit">确认删除</button>
+      <a class="button" href="{% url 'dashboard' %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

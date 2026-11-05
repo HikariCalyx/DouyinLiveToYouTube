@@ -1,0 +1,45 @@
+{% extends "streams/base.html" %}
+
+{% block title %}全局设置 · 抖音 → YouTube{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h1>全局设置</h1>
+  <form method="post">
+    {% csrf_token %}
+    {% for error in form.non_field_errors %}
+    <p class="error">{{ error }}</p>
+    {% endfor %}
+
+    <h2>抖音</h2>
+    {% include "streams/_field.html" with field=form.cookie %}
+
+    <h2>检测</h2>
+    {% include "streams/_field.html" with field=form.poll_interval %}
+    {% include "streams/_field.html" with field=form.retry_interval %}
+
+    <h2>画质与编码</h2>
+    {% include "streams/_field.html" with field=form.default_quality %}
+    {% include "streams/_field.html" with field=form.video_mode %}
+    {% include "streams/_field.html" with field=form.video_bitrate_kbps %}
+    {% include "streams/_field.html" with field=form.audio_mode %}
+    {% include "streams/_field.html" with field=form.audio_bitrate %}
+
+    <h2>YouTube</h2>
+    {% include "streams/_field.html" with field=form.rtmp_server %}
+    {% include "streams/_field.html" with field=form.default_stream_key %}
+
+    <h2>其它</h2>
+    {% include "streams/_field.html" with field=form.show_source_url %}
+    {% include "streams/_field.html" with field=form.ffmpeg_path %}
+    <p class="muted small">
+      当前使用的 FFmpeg：{% if resolved_ffmpeg %}<code>{{ resolved_ffmpeg }}</code>{% else %}<span class="error">未找到</span>{% endif %}
+    </p>
+
+    <div class="form-actions">
+      <button class="primary" type="submit">保存</button>
+      <a class="button" href="{% url 'dashboard' %}">返回</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

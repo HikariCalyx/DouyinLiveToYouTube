@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 import functools
+import logging
 import traceback
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .logger import logger
+logger = logging.getLogger(__name__)
 
 OptionalStr = str | None
 OptionalDict = dict | None

@@ -1,0 +1,106 @@
+{% extends "streams/base.html" %}
+
+{% block title %}直播间 · 抖音 → YouTube{% endblock %}
+
+{% block content %}
+<div id="worker-banner" class="banner warn" {% if worker_ok %}hidden{% endif %}>
+  推流进程未运行。请在服务器上启动 <code>python manage.py run_restreamer</code>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h1>直播间</h1>
+    <a class="button primary" href="{% url 'room_create' %}">新增直播间</a>
+  </div>
+
+  {% if rooms %}
+  <div class="table-wrap">
+    <table class="rooms">
+      <thead>
+        <tr>
+          <th>直播间</th>
+          <th>画质</th>
+          <th>状态</th>
+          <th>推流时长</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for room in rooms %}
+        <tr data-room-id="{{ room.pk }}">
+          <td>
+            <div class="room-name">{{ room.display_name }}</div>
+            <div class="muted small">{{ room.douyin_url }}</div>
+            <div class="muted small room-message">{{ room.status_message }}</div>
+          </td>
+          <td>{{ room.quality|default:"默认" }}</td>
+          <td><span class="status-pill status-{{ room.status }}">{{ room.get_status_display }}</span></td>
+          <td class="room-duration">{% if room.running_session %}{{ room.running_session.duration_text }}{% endif %}</td>
+          <td class="actions">
+            <form method="post" action="{% url 'room_start' room.pk %}">
+              {% csrf_token %}<button type="submit" class="small">开始</button>
+            </form>
+            <form method="post" action="{% url 'room_stop' room.pk %}">
+              {% csrf_token %}<button type="submit" class="small danger">停止</button>
+            </form>
+            <a class="small" href="{% url 'room_edit' room.pk %}">编辑</a>
+            {% if room.running_session %}
+            <a class="small" href="{% url 'session_log' room.running_session.pk %}">日志</a>
+            {% endif %}
+            <a class="small danger" href="{% url 'room_delete' room.pk %}">删除</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">还没有直播间。先添加一个抖音直播间地址吧。</p>
+  {% endif %}
+</section>
+
+<p class="muted small">
+  默认画质 {{ global_settings.default_quality }} ·
+  视频 {{ global_settings.get_video_mode_display }} ·
+  音频 {{ global_settings.get_audio_mode_display }} ·
+  检测间隔 {{ global_settings.poll_interval }} 秒
+</p>
+
+<script>
+(function () {
+  const statusUrl = "{% url 'status_api' %}";
+  const pillClasses = ["status-idle", "status-offline", "status-live", "status-pushing", "status-error", "status-disabled"];
+
+  function paintPill(pill, status, label) {
+    pillClasses.forEach(function (name) { pill.classList.remove(name); });
+    pill.classList.add("status-" + status);
+    pill.textContent = label;
+  }
+
+  function refresh() {
+    fetch(statusUrl, { headers: { "Accept": "application/json" }, credentials: "same-origin" })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) {
+        if (!data) { return; }
+        const rooms = {};
+        data.rooms.forEach(function (room) { rooms[room.id] = room; });
+        document.querySelectorAll("tr[data-room-id]").forEach(function (row) {
+          const info = rooms[row.dataset.roomId];
+          if (!info) { return; }
+          const pill = row.querySelector(".status-pill");
+          if (pill) { paintPill(pill, info.status, info.status_label); }
+          const message = row.querySelector(".room-message");
+          if (message) { message.textContent = info.message || ""; }
+          const duration = row.querySelector(".room-duration");
+          if (duration) { duration.textContent = info.duration || ""; }
+        });
+        const banner = document.getElementById("worker-banner");
+        if (banner) { banner.hidden = !!data.worker_ok; }
+      })
+      .catch(function () { /* keep the last known state */ });
+  }
+
+  setInterval(refresh, 5000);
+})();
+</script>
+{% endblock %}

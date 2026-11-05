@@ -1,18 +1,17 @@
 [project]
 name = "DouyinLiveToYouTube"
-version = "1.0.0"
-description = "将抖音直播实时转发至 YouTube 的 FFmpeg RTMP 推流工具"
+version = "2.0.0"
+description = "Django 仪表盘：将抖音直播实时转发至 YouTube（FFmpeg RTMP 推流）"
 readme = "README.md"
 authors = [{name = "HikariCalyx"}]
 license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
+    "Django>=5.2,<6.0",
+    "whitenoise>=6.6",
+    "gunicorn>=23.0",
     "httpx[http2]>=0.28.1",
-    "loguru>=0.7.3",
 ]
 
 [tool.setuptools]
-py-modules = ["main"]
-
-[tool.setuptools.packages.find]
-include = ["src*"]
+packages = ["dashboard", "streams", "src"]

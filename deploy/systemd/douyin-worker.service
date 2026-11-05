@@ -1,0 +1,21 @@
+[Unit]
+Description=Douyin -> YouTube restream worker (FFmpeg supervisor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/douyin-live-to-youtube
+EnvironmentFile=/etc/douyin-live-to-youtube.env
+ExecStart=/opt/douyin-live-to-youtube/.venv/bin/python manage.py run_restreamer
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=40
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

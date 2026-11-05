@@ -1,105 +1,129 @@
 # DouyinLiveToYouTube
 
-将**抖音直播间**的实时画面，通过 **FFmpeg** 转发（restream）到 **YouTube 直播**。
+把**抖音直播间**的实时画面，通过 **FFmpeg** 转发（restream）到 **YouTube 直播**，并提供一个 **Django 仪表盘**来管理直播间与推流状态。生产环境通过 **CloudFront** 反向代理对外提供服务。
 
-程序会持续检测 `config/URL_config.ini` 中填写的抖音直播间状态：开播后自动拉取直播源并推流到 YouTube RTMP 地址，下播后停止推流并继续等待，无需人工干预。
+> 本项目由 [DouyinLiveRecorder](https://github.com/ihmily/DouyinLiveRecorder)（作者 Hmily）精简改造而来，仅保留抖音直播解析与 FFmpeg 推流能力，并重构为 Web 后台。
 
-> 本项目由 [DouyinLiveRecorder](https://github.com/ihmily/DouyinLiveRecorder) 精简改造而来，仅保留抖音直播解析与 FFmpeg 推流能力。
+## 架构
+
+```
+浏览器 ──HTTPS──▶ CloudFront ──▶ ALB / Nginx ──▶ gunicorn (Django)  ─┐
+                                                                     │ 读写
+                                                                 SQLite (WAL)
+                                                                     │ 读写
+                                       run_restreamer 进程 ──▶ FFmpeg ──RTMP──▶ YouTube
+```
+
+- **Web 进程只读写数据库**，不会启动 FFmpeg，因此可以安全地跑多个 gunicorn worker。
+- **推流进程**（`manage.py run_restreamer`）是唯一管理 FFmpeg 子进程的地方，用文件锁保证单实例。
+- 两者通过 SQLite 共享状态：网页改数据库，守护进程轮询并更新状态。
 
 ## 功能
 
-- 抖音直播间状态检测（网站直播间链接、`v.douyin.com` 分享链接、用户主页链接）
-- 开播自动推流、下播自动停止、断流自动重连
-- 支持多直播间同时转发（每个直播间对应一个 YouTube 串流密钥）
-- 画质选择：原画 / 蓝光 / 超清 / 高清 / 标清 / 流畅
-- 编码策略：默认 `copy` 直通（视频、音频均不重新编码，几乎不占 CPU）；抖音原画为 H.265 时自动切换同一直播间的 H.264 清晰度；`auto` 可改为转码 H.264
+- 登录后可见的直播间仪表盘：状态、推流时长、错误信息自动刷新
+- 直播间增删改，可单独设置画质、YouTube 串流密钥或完整推流地址
+- 手动「开始 / 停止」推流（停止后保持暂停，直到再次点击开始）
+- 全局设置：抖音 Cookie、检测间隔、默认画质、编码策略、码率、RTMP 服务器、默认密钥、FFmpeg 路径
+- 默认**零转码**直通：视频 `-c:v copy`，音频 `-c:a copy`
+- 健康检查接口 `/healthz`，供 ALB / CloudFront 探测
 
 ## 环境要求
 
-- Python 3.10+
-- FFmpeg（已放入程序目录，或已加入 `PATH`）
+- Python 3.10 及以上（Django 5.2 LTS）
+- FFmpeg（放在项目目录或加入 `PATH`）
 
-## 安装
+## 本地快速开始
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py import_legacy_config    # 可选：导入旧的 config/*.ini
+python manage.py run_restreamer          # 终端 A：推流守护进程
+python manage.py runserver               # 终端 B：Web 后台
 ```
 
-## 配置
+打开 <http://127.0.0.1:8000>，登录后即可添加抖音直播间并配置 YouTube 串流密钥。
 
-### 1. `config/config.ini`
+> 本地调试请设置 `DJANGO_DEBUG=1`。生产部署见 [docs/deployment.md](docs/deployment.md)。
 
-| 配置项 | 说明 |
+## 运行机制
+
+- 推流进程每 5 秒同步一次直播间列表：新增的房间自动开始监测，删除的房间线程自动退出。
+- 每个直播间一个线程：按「检测间隔」查询开播状态；开播后启动 FFmpeg 推流，下播后继续等待。
+- 「停止」写入 `paused=True` 并唤醒线程，立即结束当前 FFmpeg，且不再自动重连；「开始」清除暂停并立即重新检测。
+- 同一个 YouTube 串流密钥同一时间只能推一路，冲突时后启动的房间会被跳过并在界面提示。
+- 编码策略：
+  - `copy`（默认）：视频/音频都不重新编码，几乎不占 CPU；
+  - `auto`：仅当直播源为 H.265 时转码为 H.264（YouTube 不接受 H.265）；
+  - `libx264`：始终转码，可用「转码视频码率上限」限制上传带宽。
+- `copy` 模式下如果原画是 H.265，会自动切换到该直播间其它 H.264 清晰度；若全部是 H.265 则跳过该直播间。
+
+## 配置来源
+
+运行配置全部在数据库里，通过网页维护。`config/config.ini` 与 `config/URL_config.ini` 只供 `import_legacy_config` 首次导入使用：
+
+| 旧文件 | 导入内容 |
 | --- | --- |
-| `循环时间(秒)` | 检测直播状态的间隔，建议不低于 60 秒 |
-| `直播画质` | 默认画质，`原画` / `蓝光` / `超清` / `高清` / `标清` / `流畅` |
-| `视频编码` | `copy`（默认，直接复制不转码）/ `auto`（H.265 时转码）/ `libx264`（始终转码） |
-| `视频码率(kbps)` | 转码时的视频码率上限，仅转码时生效 |
-| `音频编码` | `copy`（默认，直接复制）/ `aac`（重新编码） |
-| `音频码率` | 重新编码音频时的码率，YouTube 建议 128k 以上 |
-| `断流重试间隔(秒)` | 推流中断后重新检测的等待时间 |
-| `是否显示直播源地址(是/否)` | 是否在日志中打印抖音直播源地址 |
-| `RTMP服务器地址` | 默认 `rtmp://a.rtmp.youtube.com/live2` |
-| `默认串流密钥` | YouTube 直播的串流密钥 |
-| `抖音cookie` | 网页端登录后的 Cookie，建议填写以降低风控概率 |
+| `config/config.ini` | Cookie、检测间隔、画质、编码、码率、RTMP 服务器、默认密钥 |
+| `config/URL_config.ini` | 每行 `[画质,]直播间地址[,串流密钥或完整推流地址]`，`#` 开头为注释 |
 
-### 2. `config/URL_config.ini`
+重复执行不会覆盖已有数据，加 `--force` 才会覆盖。
 
-每行一个直播间，格式为 `[画质,]直播间地址[,YouTube串流密钥或完整推流地址]`：
+### 环境变量
 
-```ini
-# 使用默认密钥与默认画质
-https://live.douyin.com/123456789
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `DJANGO_SECRET_KEY` | Django 密钥，生产必须设置 | 开发用占位值 |
+| `DJANGO_DEBUG` | 调试模式 | `0` |
+| `DJANGO_ALLOWED_HOSTS` | 允许的主机名，逗号分隔 | `localhost,127.0.0.1` |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | 允许提交表单的来源（含协议） | 空 |
+| `DJANGO_HTTPS` | 安全 Cookie（HTTPS 部署设为 1） | 非 DEBUG 时为 `1` |
+| `DJANGO_SECURE_SSL_REDIRECT` | 是否由 Django 做 HTTPS 跳转 | `0` |
+| `DJANGO_SECURE_HSTS_SECONDS` | HSTS 秒数 | `0` |
+| `DJANGO_ADMIN_PATH` | Django admin 路径 | `django-admin/` |
+| `DJANGO_DB_PATH` | SQLite 文件路径 | `db.sqlite3` |
+| `DJANGO_LOG_DIR` | 日志与会话日志目录 | `logs/` |
+| `DJANGO_TIME_ZONE` | 时区 | `Asia/Shanghai` |
+| `DJANGO_LOG_LEVEL` | 日志级别 | `INFO` |
 
-# 单独指定画质
-高清,https://live.douyin.com/123456789
-
-# 单独指定串流密钥
-原画,https://live.douyin.com/123456789,abcd-efgh-ijkl-mnop
-
-# 直接填写完整推流地址
-https://live.douyin.com/123456789,rtmp://a.rtmp.youtube.com/live2/abcd-efgh-ijkl-mnop
-
-# 行首加 # 可临时忽略该直播间
-# https://live.douyin.com/987654321
-```
-
-## 运行
+## 常用命令
 
 ```bash
-python main.py
+python manage.py run_restreamer --check   # 校验 ffmpeg / 设置 / 直播间后退出
+python manage.py collectstatic            # 生成静态文件（WhiteNoise 使用）
+python manage.py import_legacy_config --force --config-dir ./config
 ```
-
-修改配置或直播间列表后需要重启程序生效。按 `Ctrl+C` 可安全退出（正在推流的 FFmpeg 会被正常终止）。
-
-## 注意事项
-
-- 一个 YouTube 串流密钥同一时间只能承载一路直播，多个直播间请分别配置不同的密钥，否则程序会跳过冲突的推流并记录错误日志。
-- YouTube 要求视频编码为 H.264、音频为 AAC。默认 `copy` 直通时，若原画为 H.265，程序会自动改用该直播间其它 H.264 清晰度；若所有清晰度都是 H.265，则跳过该直播间（可将 `视频编码` 改为 `auto` 自动转码）。
-- 直通模式要求抖音音轨为 AAC（绝大多数直播间如此）。若日志出现音频相关错误，将 `音频编码` 改为 `aac`。
-- 长间隔（60 秒以上）可以降低抖音接口风控概率，代价是最多延迟一个检测周期才开播。
-- 日志与错误信息保存在 `logs/` 目录。
 
 ## 项目结构
 
 ```
 .
-├── config
-│   ├── config.ini        # 推流、编码与 YouTube 配置
-│   └── URL_config.ini    # 抖音直播间列表
-├── logs                  # 运行日志
-├── src
-│   ├── ab_sign.py        # 抖音 a_bogus 签名
-│   ├── http_clients      # HTTP 请求封装
-│   ├── logger.py         # 日志
-│   ├── room.py           # 分享链接 / 主页链接解析
-│   ├── spider.py         # 抖音直播间数据解析
-│   ├── stream.py         # 直播源地址选择
-│   └── utils.py          # 通用工具
-├── main.py               # 主程序：监测、推流调度、FFmpeg 进程管理
+├── dashboard/              # Django 项目（settings / urls / wsgi）
+├── streams/
+│   ├── models.py           # GlobalSettings / Room / LiveSession / WorkerState
+│   ├── services.py         # 抖音解析、流选择、FFmpeg 命令（纯函数，可测试）
+│   ├── worker.py           # 推流守护进程（线程 + 数据库状态机）
+│   ├── views.py            # 仪表盘、房间 CRUD、启停、状态 API、健康检查
+│   ├── management/commands # run_restreamer / import_legacy_config
+│   ├── tests.py            # 单元测试与视图测试
+│   ├── templates/          # 页面模板
+│   └── static/             # 样式
+├── src/                    # 抖音直播间解析（ab_sign / spider / stream / room）
+├── deploy/                 # systemd 单元与环境变量示例
+├── docs/                   # 部署文档
+├── config/                 # 旧版 ini（仅用于导入）
+├── manage.py
 └── requirements.txt
 ```
 
+## 部署
+
+部署到 AWS（EC2 / ALB + CloudFront）的完整步骤见 **[docs/deployment.md](docs/deployment.md)**。
+
 ## 许可与致谢
 
-本项目基于 [DouyinLiveRecorder](https://github.com/ihmily/DouyinLiveRecorder)（作者 Hmily）精简改造，遵循 MIT 协议，见 [LICENSE](LICENSE)。
+基于 [DouyinLiveRecorder](https://github.com/ihmily/DouyinLiveRecorder)（作者 Hmily）精简改造，遵循 MIT 协议，见 [LICENSE](LICENSE)。

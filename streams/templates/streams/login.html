@@ -1,0 +1,27 @@
+{% extends "streams/base.html" %}
+
+{% block title %}登录 · 抖音 → YouTube{% endblock %}
+
+{% block content %}
+<section class="card narrow">
+  <h1>登录</h1>
+  {% if form.errors %}
+  <p class="error">用户名或密码不正确，请重试。</p>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <div class="field">
+      <label for="{{ form.username.id_for_label }}">用户名</label>
+      {{ form.username }}
+    </div>
+    <div class="field">
+      <label for="{{ form.password.id_for_label }}">密码</label>
+      {{ form.password }}
+    </div>
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="form-actions">
+      <button class="primary" type="submit">登录</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
