@@ -113,7 +113,7 @@ python manage.py import_legacy_config --force --config-dir ./config
 │   ├── templates/          # 页面模板
 │   └── static/             # 样式
 ├── src/                    # 抖音直播间解析（ab_sign / spider / stream / room）
-├── deploy/                 # systemd 单元与环境变量示例
+├── deploy/                 # systemd 单元、nginx 反代配置与环境变量示例
 ├── docs/                   # 部署文档
 ├── config/                 # 旧版 ini（仅用于导入）
 ├── manage.py

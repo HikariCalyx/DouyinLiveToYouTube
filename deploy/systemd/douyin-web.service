@@ -8,9 +8,13 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/douyin-live-to-youtube
+# 默认只监听本机（Nginx/ALB 反代时使用）。
+# 若改为 CloudFront 直连 gunicorn，请在 EnvironmentFile 中设置 DJANGO_BIND=0.0.0.0:8000，
+# 并且务必把安全组限制为 CloudFront 的 IP 段。
+Environment=DJANGO_BIND=127.0.0.1:8000
 EnvironmentFile=/etc/douyin-live-to-youtube.env
 ExecStart=/opt/douyin-live-to-youtube/.venv/bin/gunicorn dashboard.wsgi:application \
-    --bind 127.0.0.1:8000 \
+    --bind ${DJANGO_BIND} \
     --workers 2 \
     --threads 4 \
     --timeout 60 \
